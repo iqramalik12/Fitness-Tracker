@@ -1,0 +1,21 @@
+{
+  "short_name": "PulseFit",
+  "name": "Pulse.fit — AI Powered Fitness & Nutrition",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=192&q=80",
+      "type": "image/jpeg",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=512&q=80",
+      "type": "image/jpeg",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#10b981",
+  "display": "standalone",
+  "orientation": "portrait"
+}

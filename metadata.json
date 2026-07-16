@@ -1,0 +1,6 @@
+{
+  "name": "Premium Fitness Tracker",
+  "description": "A comprehensive responsive fitness tracker, workout planner, water and calorie logger, and personalized AI Coach.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

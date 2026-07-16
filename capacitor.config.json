@@ -1,0 +1,23 @@
+{
+  "appId": "com.pulsefit.app",
+  "appName": "PulseFit",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "https://images.unsplash.com",
+      "*.run.app"
+    ]
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_status_bar",
+      "iconColor": "#10b981",
+      "sound": "beep.wav"
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

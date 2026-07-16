@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Pulse.fit — AI Powered Fitness & Nutrition</title>
+    
+    <!-- PWA & Mobile Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#10b981" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PulseFit" />
+    <link rel="apple-touch-icon" href="https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=192&q=80" />
+    
+    <!-- Meta description for SEO & accessibility -->
+    <meta name="description" content="Pulse.fit is an AI-powered fitness tracker, custom meal planner, calorie calculator, hydration supervisor, and elite lifestyle coach." />
+  </head>
+  <body class="bg-slate-950 text-slate-50 antialiased select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Dynamic Service Worker Registration for Offline Resilience -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/sw.js")
+            .then((reg) => {
+              console.log("[PWA Success] Service worker successfully active: ", reg.scope);
+            })
+            .catch((err) => {
+              console.warn("[PWA Warning] Service worker registration failed: ", err);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
+
