@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Home, Dumbbell, Apple, Bot, User, Menu } from "lucide-react";
+import { motion, AnimatePresence, MotionConfig } from "motion/react";
+import { Home, Dumbbell, Apple, Bot, User, Activity } from "lucide-react";
 import DeviceFrame from "./components/DeviceFrame";
 import SplashScreen from "./components/SplashScreen";
 import OnboardingScreen from "./components/OnboardingScreen";
@@ -18,6 +19,22 @@ import { UserProfile, DailyLog } from "./types";
 import { DEFAULT_PROFILE } from "./data";
 
 const todayStr = () => new Date().toISOString().split("T")[0];
+
+const TABS = [
+  { label: "Home", icon: Home },
+  { label: "Workout", icon: Dumbbell },
+  { label: "Diet", icon: Apple },
+  { label: "AI Coach", icon: Bot },
+  { label: "Profile", icon: User }
+];
+
+// Shared fade/slide used when switching screens and tabs
+const pageTransition = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -8 },
+  transition: { duration: 0.25, ease: "easeOut" as const },
+};
 
 const emptyLog = (weight: number): DailyLog => ({
   waterLogged: 0,
@@ -300,64 +317,134 @@ export default function App() {
     }
   };
 
+  // In full screen web mode, desktop gets a sidebar and a centred content column
+  const webLayout = isFullscreen;
+
   return (
-    <DeviceFrame isFullscreen={isFullscreen} setIsFullscreen={setIsFullscreen}>
-      {activeScreen === "splash" && (
-        <SplashScreen onFinish={handleSplashFinish} />
-      )}
+    <MotionConfig reducedMotion="user">
+    <DeviceFrame
+      isFullscreen={isFullscreen}
+      setIsFullscreen={setIsFullscreen}
+      profile={activeScreen === "main" ? profile : undefined}
+      log={activeScreen === "main" ? dailyLog : undefined}
+    >
+      <AnimatePresence mode="wait">
+        {activeScreen !== "main" && (
+          <motion.div
+            key={activeScreen}
+            {...pageTransition}
+            className={`flex-1 flex flex-col min-h-0 ${webLayout ? "md:w-full md:max-w-md md:mx-auto md:my-8 md:rounded-[2rem] md:border md:border-white/10 md:shadow-2xl md:overflow-hidden md:bg-slate-950" : ""}`}
+          >
+            {activeScreen === "splash" && (
+              <SplashScreen onFinish={handleSplashFinish} />
+            )}
 
-      {activeScreen === "auth" && (
-        <LoginSignupScreen
-          onSuccess={handleLoginSuccess}
-          onGoToOnboarding={() => setAppScreen("onboarding")}
-        />
-      )}
+            {activeScreen === "auth" && (
+              <LoginSignupScreen
+                onSuccess={handleLoginSuccess}
+                onGoToOnboarding={() => setAppScreen("onboarding")}
+              />
+            )}
 
-      {activeScreen === "onboarding" && (
-        <OnboardingScreen onComplete={handleOnboardingComplete} />
-      )}
+            {activeScreen === "onboarding" && (
+              <OnboardingScreen onComplete={handleOnboardingComplete} />
+            )}
+          </motion.div>
+        )}
 
-      {activeScreen === "main" && (
-        <div className="flex-1 flex flex-col justify-between h-full relative overflow-hidden bg-slate-950">
-          
-          {/* Main Content Area */}
-          <div className="flex-1 overflow-hidden flex flex-col">
-            {renderMainTabContent()}
-          </div>
-
-          {/* Bottom Simulated Tab Bar Navigation (Premium Dark Glass Theme) */}
-          <div className="h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 pb-1 shrink-0 z-40 select-none">
-            {[
-              { label: "Home", icon: Home },
-              { label: "Workout", icon: Dumbbell },
-              { label: "Diet", icon: Apple },
-              { label: "AI Coach", icon: Bot },
-              { label: "Profile", icon: User }
-            ].map((tab, idx) => {
-              const TabIcon = tab.icon;
-              const isActive = activeTab === idx;
-              return (
-                <button
-                  key={idx}
-                  onClick={() => setActiveTab(idx)}
-                  className="flex flex-col items-center justify-center flex-1 h-full py-1 text-slate-400 hover:text-white transition-colors relative cursor-pointer"
-                >
-                  <TabIcon className={`w-5 h-5 transition-transform ${isActive ? "text-emerald-400 scale-110" : "text-slate-400 hover:scale-105"}`} />
-                  <span className={`text-[9px] font-bold mt-1 tracking-wider uppercase ${isActive ? "text-emerald-400" : "text-slate-500"}`}>
-                    {tab.label}
+        {activeScreen === "main" && (
+          <motion.div
+            key="main"
+            {...pageTransition}
+            className={`flex-1 flex flex-col md:flex-row h-full min-h-0 relative overflow-hidden ${webLayout ? "md:bg-transparent" : ""} bg-slate-950`}
+          >
+            {/* Desktop sidebar (full screen web mode only) */}
+            {webLayout && (
+              <aside className="hidden md:flex flex-col w-64 shrink-0 p-6 border-r border-white/10 bg-slate-950/60 backdrop-blur-xl z-40">
+                <div className="flex items-center gap-2.5 px-2 mb-10">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                    <Activity className="w-5 h-5 text-slate-950" strokeWidth={2.5} />
+                  </div>
+                  <span className="font-display text-lg font-bold tracking-tight">
+                    Pulse<span className="text-emerald-400">.fit</span>
                   </span>
-                  
-                  {/* Small dynamic emerald active dot indicator */}
-                  {isActive && (
-                    <div className="absolute top-0 w-8 h-[2px] bg-emerald-400 rounded-full" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                </div>
 
-        </div>
-      )}
+                <nav className="flex flex-col gap-1.5">
+                  {TABS.map((tab, idx) => {
+                    const TabIcon = tab.icon;
+                    const isActive = activeTab === idx;
+                    return (
+                      <button
+                        key={tab.label}
+                        onClick={() => setActiveTab(idx)}
+                        className={`relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isActive ? "text-white" : "text-slate-400 hover:text-white hover:bg-white/5"}`}
+                      >
+                        {isActive && (
+                          <motion.span
+                            layoutId="sidebar-active"
+                            className="absolute inset-0 rounded-xl bg-gradient-to-r from-emerald-500/20 to-cyan-500/10 border border-emerald-500/30"
+                            transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                          />
+                        )}
+                        <TabIcon className={`relative w-5 h-5 ${isActive ? "text-emerald-400" : ""}`} />
+                        <span className="relative">{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                <div className="mt-auto p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-sm font-semibold text-white truncate">{profile.name}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{profile.goal} · {profile.country}</p>
+                </div>
+              </aside>
+            )}
+
+            <div className="flex-1 flex flex-col min-h-0 min-w-0">
+              {/* Main Content Area */}
+              <div className={`flex-1 overflow-hidden flex flex-col min-h-0 ${webLayout ? "md:w-full md:max-w-2xl md:mx-auto md:my-6 md:rounded-[2rem] md:border md:border-white/10 md:bg-slate-950/90 md:shadow-2xl" : ""}`}>
+                <AnimatePresence mode="wait">
+                  <motion.div key={activeTab} {...pageTransition} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    {renderMainTabContent()}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              {/* Bottom Simulated Tab Bar Navigation (Premium Dark Glass Theme) */}
+              <div className={`h-16 bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 pb-1 shrink-0 z-40 select-none ${webLayout ? "md:hidden" : ""}`}>
+                {TABS.map((tab, idx) => {
+                  const TabIcon = tab.icon;
+                  const isActive = activeTab === idx;
+                  return (
+                    <motion.button
+                      key={tab.label}
+                      onClick={() => setActiveTab(idx)}
+                      whileTap={{ scale: 0.88 }}
+                      className="flex flex-col items-center justify-center flex-1 h-full py-1 text-slate-400 hover:text-white transition-colors relative cursor-pointer"
+                    >
+                      <TabIcon className={`w-5 h-5 transition-transform ${isActive ? "text-emerald-400 scale-110" : "text-slate-400 hover:scale-105"}`} />
+                      <span className={`text-[9px] font-bold mt-1 tracking-wider uppercase ${isActive ? "text-emerald-400" : "text-slate-500"}`}>
+                        {tab.label}
+                      </span>
+
+                      {/* Emerald indicator that slides between tabs */}
+                      {isActive && (
+                        <motion.div
+                          layoutId="tabbar-active"
+                          className="absolute top-0 w-8 h-[2px] bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+                          transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                        />
+                      )}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </DeviceFrame>
+    </MotionConfig>
   );
 }

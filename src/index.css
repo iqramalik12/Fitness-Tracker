@@ -63,3 +63,33 @@ body {
   animation: float 4s ease-in-out infinite;
 }
 
+/* Subtle dot grid that fades out towards the edges */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.18) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+/* Gradient headline text that slowly shifts colour */
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.text-gradient-animated {
+  background: linear-gradient(90deg, #34d399, #22d3ee, #a78bfa, #34d399);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gradient-shift 8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-ring,
+  .animate-float,
+  .text-gradient-animated {
+    animation: none;
+  }
+}
+
