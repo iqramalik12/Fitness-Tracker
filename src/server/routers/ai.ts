@@ -54,7 +54,7 @@ router.post("/coach", loadUserProfile, async (req: Request, res: Response) => {
     const ai = getGeminiClient();
     if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY") {
       return res.json({
-        text: "👋 As-salamu alaykum / Hello! I am your AI Coach. To enable my fully personalized smart coaching powered by Gemini, please enter your Gemini API Key in the **Settings > Secrets** panel in the AI Studio sidebar! In the meantime, I can provide simulated coaching tips based on your profile goals.",
+        text: "👋 As-salamu alaykum / Hello! I am your AI Coach. To enable my fully personalized smart coaching powered by Gemini, add your Gemini API key as **GEMINI_API_KEY** in the server's `.env` file and restart the app. In the meantime, I can provide simulated coaching tips based on your profile goals.",
         fallback: true
       });
     }

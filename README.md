@@ -15,6 +15,6 @@ View your app in AI Studio: https://ai.studio/apps/8f25e06b-67c8-4697-b6af-cb4f0
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Copy `.env.example` to `.env` and set `GEMINI_API_KEY` to your Gemini API key (without it the AI Coach shows offline tips)
 3. Run the app:
    `npm run dev`

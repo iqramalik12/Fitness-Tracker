@@ -70,6 +70,37 @@ export function verifyToken(token: string): any {
   }
 }
 
+// Password hashing with scrypt: stored as "scrypt$<salt>$<hash>"
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+}
+
+export function verifyPassword(password: string, stored: string | undefined): boolean {
+  if (!stored) return false;
+  if (!stored.startsWith("scrypt$")) {
+    // Legacy plain text record (e.g. seeded demo user)
+    return stored === password;
+  }
+  const [, salt, hash] = stored.split("$");
+  const expected = Buffer.from(hash, "hex");
+  const actual = crypto.scryptSync(password, salt, expected.length);
+  return crypto.timingSafeEqual(expected, actual);
+}
+
+// Never send the password field to the client
+function publicUser(user: UserProfile) {
+  const { password, ...profile } = user;
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    onboarded: user.onboarded,
+    profile
+  };
+}
+
 // OTP store map: email -> { code, expiresAt }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
 
@@ -114,7 +145,7 @@ router.post("/signup", (req: Request, res: Response) => {
   const newUser: Omit<UserProfile, "id"> = {
     name: name.trim(),
     email: emailLower,
-    password, // Stored safely in sandbox plain text for easy debugging
+    password: hashPassword(password),
     gender: "Other",
     age: 25,
     country: "Pakistan",
@@ -139,13 +170,7 @@ router.post("/signup", (req: Request, res: Response) => {
   res.status(201).json({
     message: "User signed up successfully.",
     token,
-    user: {
-      id: savedUser.id,
-      name: savedUser.name,
-      email: savedUser.email,
-      onboarded: savedUser.onboarded,
-      profile: savedUser
-    }
+    user: publicUser(savedUser)
   });
 });
 
@@ -158,25 +183,23 @@ router.post("/login", (req: Request, res: Response) => {
   }
 
   const emailLower = email.toLowerCase().trim();
-  const matchedUsers = db.findUsers(u => u.email.toLowerCase() === emailLower && u.password === password);
+  const matchedUsers = db.findUsers(u => u.email.toLowerCase() === emailLower && verifyPassword(password, u.password));
 
   if (matchedUsers.length === 0) {
     return res.status(401).json({ error: "Invalid email address or incorrect password." });
   }
 
   const user = matchedUsers[0];
+  // Upgrade legacy plain text passwords to a hash on successful login
+  if (!user.password?.startsWith("scrypt$")) {
+    db.update("users", user.id, { password: hashPassword(password) });
+  }
   const token = signToken({ id: user.id, email: user.email, name: user.name });
 
   res.json({
     message: "Login successful.",
     token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      onboarded: user.onboarded,
-      profile: user
-    }
+    user: publicUser(user)
   });
 });
 
@@ -196,7 +219,7 @@ router.post("/social-login", (req: Request, res: Response) => {
     const newUser: Omit<UserProfile, "id"> = {
       name: name.trim(),
       email: emailLower,
-      password: `social-${provider}-${Math.random().toString(36).slice(2)}`,
+      password: hashPassword(crypto.randomBytes(32).toString("hex")),
       gender: "Other",
       age: 26,
       country: "Pakistan",
@@ -224,13 +247,7 @@ router.post("/social-login", (req: Request, res: Response) => {
   res.json({
     message: `Connected successfully with ${provider}.`,
     token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      onboarded: user.onboarded,
-      profile: user
-    }
+    user: publicUser(user)
   });
 });
 
@@ -309,7 +326,7 @@ router.post("/reset-password", (req: Request, res: Response) => {
   }
 
   const user = matchedUsers[0];
-  db.update("users", user.id, { password });
+  db.update("users", user.id, { password: hashPassword(password) });
   otpStore.delete(emailLower);
 
   res.json({
@@ -337,19 +354,9 @@ router.get("/session", (req: Request, res: Response) => {
     return res.status(404).json({ error: "Associated user not found." });
   }
 
-  const user = matchedUsers[0];
-  // Do not expose password to frontend
-  const { password, ...userProfile } = user;
-
   res.json({
     valid: true,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      onboarded: user.onboarded,
-      profile: userProfile
-    }
+    user: publicUser(matchedUsers[0])
   });
 });
 

@@ -17,6 +17,37 @@ import ProfileTab from "./components/ProfileTab";
 import { UserProfile, DailyLog } from "./types";
 import { DEFAULT_PROFILE } from "./data";
 
+const todayStr = () => new Date().toISOString().split("T")[0];
+
+const emptyLog = (weight: number): DailyLog => ({
+  waterLogged: 0,
+  stepsCount: 0,
+  caloriesBurned: 0,
+  caloriesConsumed: 0,
+  weightLog: weight,
+  date: todayStr(),
+});
+
+// Authenticated call to the backend; returns parsed JSON or null when offline/unauthenticated
+async function apiRequest(path: string, method = "GET", body?: unknown): Promise<any | null> {
+  const token = localStorage.getItem("pulse_auth_token");
+  if (!token) return null;
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return res.ok ? await res.json() : null;
+  } catch (e) {
+    console.warn(`Backend sync failed for ${path}:`, e);
+    return null;
+  }
+}
+
 export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [activeScreen, setActiveScreen] = useState<"splash" | "auth" | "onboarding" | "main">("splash");
@@ -24,14 +55,16 @@ export default function App() {
 
   // Core synchronized profile and daily statistics states
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
-  const [dailyLog, setDailyLog] = useState<DailyLog>({
-    waterLogged: 1250,
-    stepsCount: 6400,
-    caloriesBurned: 310,
-    caloriesConsumed: 1650,
-    weightLog: DEFAULT_PROFILE.weight,
-    date: new Date().toISOString().split("T")[0],
-  });
+  const [dailyLog, setDailyLog] = useState<DailyLog>(emptyLog(DEFAULT_PROFILE.weight));
+
+  // Pull today's log from the server so data follows the account across devices
+  const loadServerLog = async () => {
+    const data = await apiRequest("/api/users/daily-log");
+    if (data?.log) {
+      setDailyLog(data.log);
+      localStorage.setItem("pulse_daily_log_v3", JSON.stringify(data.log));
+    }
+  };
 
   // Load state cache on startup with full JWT session validation
   useEffect(() => {
@@ -39,7 +72,9 @@ export default function App() {
       try {
         const cachedLog = localStorage.getItem("pulse_daily_log_v3");
         if (cachedLog) {
-          setDailyLog(JSON.parse(cachedLog));
+          const parsedLog: DailyLog = JSON.parse(cachedLog);
+          // A log from a previous day starts fresh
+          setDailyLog(parsedLog.date === todayStr() ? parsedLog : emptyLog(parsedLog.weightLog));
         }
 
         const token = localStorage.getItem("pulse_auth_token");
@@ -55,7 +90,8 @@ export default function App() {
             const data = await res.json();
             setProfile(data.user.profile);
             localStorage.setItem("pulse_user_profile_v3", JSON.stringify(data.user.profile));
-            
+            await loadServerLog();
+
             if (data.user.onboarded) {
               setAppScreen("main");
             } else {
@@ -99,11 +135,13 @@ export default function App() {
   const saveProfile = (newProfile: UserProfile) => {
     setProfile(newProfile);
     localStorage.setItem("pulse_user_profile_v3", JSON.stringify(newProfile));
+    apiRequest("/api/users/profile", "PUT", newProfile);
   };
 
   const saveDailyLog = (newLog: DailyLog) => {
     setDailyLog(newLog);
     localStorage.setItem("pulse_daily_log_v3", JSON.stringify(newLog));
+    apiRequest("/api/users/daily-log", "PUT", newLog);
   };
 
   const setAppScreen = (screen: "splash" | "auth" | "onboarding" | "main") => {
@@ -129,9 +167,11 @@ export default function App() {
     }
   };
 
-  const handleLoginSuccess = (token: string, loggedInProfile: UserProfile) => {
+  const handleLoginSuccess = async (token: string, loggedInProfile: UserProfile) => {
     localStorage.setItem("pulse_auth_token", token);
-    saveProfile(loggedInProfile);
+    setProfile(loggedInProfile);
+    localStorage.setItem("pulse_user_profile_v3", JSON.stringify(loggedInProfile));
+    await loadServerLog();
     if (loggedInProfile.onboarded) {
       setAppScreen("main");
     } else {
@@ -139,19 +179,16 @@ export default function App() {
     }
   };
 
-  const handleOnboardingComplete = (completedProfile: UserProfile) => {
-    saveProfile(completedProfile);
-    
-    // Auto sync baseline log settings to fit target country
-    const targetLog: DailyLog = {
-      waterLogged: 500, // starting clean for the day
-      stepsCount: 2000,
-      caloriesBurned: 120,
-      caloriesConsumed: 600,
-      weightLog: completedProfile.weight,
-      date: new Date().toISOString().split("T")[0],
-    };
-    saveDailyLog(targetLog);
+  const handleOnboardingComplete = async (completedProfile: UserProfile) => {
+    // Persist onboarding on the server so the next login skips it
+    const data = await apiRequest("/api/users/onboard", "POST", completedProfile);
+    const finalProfile: UserProfile = data?.profile ?? completedProfile;
+    setProfile(finalProfile);
+    localStorage.setItem("pulse_user_profile_v3", JSON.stringify(finalProfile));
+
+    const startLog: DailyLog = data?.log ?? emptyLog(finalProfile.weight);
+    setDailyLog(startLog);
+    localStorage.setItem("pulse_daily_log_v3", JSON.stringify(startLog));
     setAppScreen("main");
   };
 
@@ -177,14 +214,7 @@ export default function App() {
     localStorage.removeItem("pulse_auth_token");
     
     setProfile(DEFAULT_PROFILE);
-    setDailyLog({
-      waterLogged: 1250,
-      stepsCount: 6400,
-      caloriesBurned: 310,
-      caloriesConsumed: 1650,
-      weightLog: DEFAULT_PROFILE.weight,
-      date: new Date().toISOString().split("T")[0],
-    });
+    setDailyLog(emptyLog(DEFAULT_PROFILE.weight));
     setActiveTab(0);
     setAppScreen("splash");
   };
@@ -212,14 +242,7 @@ export default function App() {
 
     // Rollback local states
     setProfile(DEFAULT_PROFILE);
-    setDailyLog({
-      waterLogged: 0,
-      stepsCount: 0,
-      caloriesBurned: 0,
-      caloriesConsumed: 0,
-      weightLog: DEFAULT_PROFILE.weight,
-      date: new Date().toISOString().split("T")[0],
-    });
+    setDailyLog(emptyLog(DEFAULT_PROFILE.weight));
     setActiveTab(0);
     setActiveScreen("auth");
   };

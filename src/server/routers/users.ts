@@ -107,8 +107,8 @@ router.post("/onboard", authenticateJwt, (req: Request, res: Response) => {
   }
   
   const existingUser = matched[0];
-  const { 
-    age, gender, country, weight, height, goal, units,
+  const {
+    name, age, gender, country, weight, height, goal, units,
     waterGoal, calorieBurnGoal, calorieIntakeGoal, stepGoal
   } = req.body;
 
@@ -118,6 +118,7 @@ router.post("/onboard", authenticateJwt, (req: Request, res: Response) => {
   const { bmi, status } = calculateBMI(weightVal, heightVal);
 
   const updates: Partial<UserProfile> = {
+    name: name && name.trim() ? name.trim() : existingUser.name,
     age: age ? parseInt(age) : 25,
     gender: gender || "Other",
     country: country || "Pakistan",
@@ -159,6 +160,37 @@ router.post("/onboard", authenticateJwt, (req: Request, res: Response) => {
     profile,
     log: initialLog
   });
+});
+
+// GET: Today's daily log (water, steps, calories, weight)
+router.get("/daily-log", authenticateJwt, (req: Request, res: Response) => {
+  const payload = (req as any).user;
+  const user = db.findUsers(u => u.id === payload.id)[0];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const log = db.getOrCreateDailyLog(payload.id, todayStr, user?.weight);
+  res.json({ log });
+});
+
+// PUT: Overwrite today's daily log counters
+router.put("/daily-log", authenticateJwt, (req: Request, res: Response) => {
+  const payload = (req as any).user;
+  const user = db.findUsers(u => u.id === payload.id)[0];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayLog = db.getOrCreateDailyLog(payload.id, todayStr, user?.weight);
+
+  const updates: Record<string, number> = {};
+  for (const field of ["waterLogged", "stepsCount", "caloriesBurned", "caloriesConsumed", "weightLog"]) {
+    const value = Number(req.body[field]);
+    if (req.body[field] !== undefined && Number.isFinite(value) && value >= 0) {
+      updates[field] = value;
+    }
+  }
+
+  const log = db.update("daily_logs", todayLog.id, updates);
+  if (!log) {
+    return res.status(500).json({ error: "Failed to update daily log." });
+  }
+  res.json({ log });
 });
 
 export default router;
