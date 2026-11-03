@@ -1,25 +1,11 @@
 import { Router, Request, Response } from "express";
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { db, UserProfile } from "../db.ts";
 import { authenticateJwt, verifyToken } from "./auth.ts";
+import { getGeminiClient, COACH_SAFETY_RULES } from "../gemini.ts";
+import { coachContext } from "../progress.ts";
 
 const router = Router();
-
-// Helper to initialize Gemini SDK with safe API key checking
-const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-    console.warn("[AI SERVICE] Warning: GEMINI_API_KEY is not set or using placeholder.");
-  }
-  return new GoogleGenAI({
-    apiKey: apiKey || "",
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build",
-      },
-    },
-  });
-};
 
 // Middleware to optionally extract user profile from JWT or fallback to body
 const loadUserProfile = (req: Request, res: Response, next: any) => {
@@ -31,6 +17,7 @@ const loadUserProfile = (req: Request, res: Response, next: any) => {
       const users = db.findUsers(u => u.id === payload.id);
       if (users.length > 0) {
         (req as any).profile = users[0];
+        (req as any).authenticated = true;
         return next();
       }
     }
@@ -51,10 +38,22 @@ router.post("/coach", loadUserProfile, async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Invalid request. 'messages' array is required." });
     }
 
+    // Signed-in users get coaching grounded in their own meals, goals and progress
+    // (only when the JWT was verified; a profile sent in the body is never trusted for data access)
+    const isAccountUser = Boolean((req as any).authenticated);
+    const dataContext = isAccountUser ? coachContext(profile) : "The user is not signed in, so no tracked data is available.";
+
     const ai = getGeminiClient();
     if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "MY_GEMINI_API_KEY") {
+      const summaryLines = dataContext
+        .split("\n")
+        .filter(l => /^- (Progress|Workouts|Meals logged|Steps|Water|Things|Wins)/.test(l))
+        .join("\n");
+      const offlineData = isAccountUser
+        ? `\n\nHere's what I can see from your logs:\n${summaryLines}\n\nOpen **Daily Goals** and **Progress** for suggestions built from this data.`
+        : "";
       return res.json({
-        text: "👋 As-salamu alaykum / Hello! I am your AI Coach. To enable my fully personalized smart coaching powered by Gemini, add your Gemini API key as **GEMINI_API_KEY** in the server's `.env` file and restart the app. In the meantime, I can provide simulated coaching tips based on your profile goals.",
+        text: "👋 As-salamu alaykum / Hello! I am your AI Coach. To enable my fully personalized smart coaching powered by Gemini, add your Gemini API key as **GEMINI_API_KEY** in the server's `.env` file and restart the app." + offlineData,
         fallback: true
       });
     }
@@ -91,6 +90,13 @@ User Profile:
 - Target Region: ${userCountry}
 
 ${regionalContext}
+
+${dataContext}
+
+Language: reply in the same style the user writes in. If they write in Roman Urdu (Urdu in Latin letters, e.g. "mujhe weight kam karna hai"), reply in simple Roman Urdu; if in English, reply in simple English. Do not switch to Urdu script unless the user does.
+When the user asks about their meals, progress or goals, use the tracked data above and say so; if something is not tracked yet, say that rather than guessing.
+
+${COACH_SAFETY_RULES}
 
 Format your response in neat, highly scannable Markdown with clear headings or bullet points where appropriate. Always structure answers to be directly helpful to the user's situation. Do not output raw HTML, but you may use markdown bolding, lists, and tables. Avoid dry medical jargon. Highlight a motivational tagline or positive encouragement at the end!`;
 

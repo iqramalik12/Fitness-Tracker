@@ -23,7 +23,41 @@ export interface UserProfile {
   isRegistered: boolean;
   onboarded: boolean;
   createdAt: string;
+  preferences?: UserPreferences;
 }
+
+export interface ReminderSetting {
+  enabled: boolean;
+  time: string; // HH:MM in the user's local time
+}
+
+export interface UserPreferences {
+  fitnessLevel: "Beginner" | "Intermediate" | "Advanced";
+  availableMinutes: number; // time per day the user can spend on exercise
+  preferredWorkoutTime: "Morning" | "Afternoon" | "Evening";
+  reminders: {
+    enabled: boolean; // master switch
+    mealLogging: ReminderSetting;
+    workout: ReminderSetting;
+    dailyGoals: ReminderSetting;
+    weeklyReview: ReminderSetting & { day: number }; // 0 = Sunday
+    maxPerDay: number;
+  };
+}
+
+export const DEFAULT_PREFERENCES: UserPreferences = {
+  fitnessLevel: "Beginner",
+  availableMinutes: 30,
+  preferredWorkoutTime: "Evening",
+  reminders: {
+    enabled: true,
+    mealLogging: { enabled: true, time: "21:00" },
+    workout: { enabled: true, time: "18:00" },
+    dailyGoals: { enabled: true, time: "09:00" },
+    weeklyReview: { enabled: true, time: "19:00", day: 0 },
+    maxPerDay: 3,
+  },
+};
 
 export interface DailyLog {
   id: string;
@@ -33,6 +67,7 @@ export interface DailyLog {
   caloriesBurned: number; // total active burn
   caloriesConsumed: number; // total intake
   weightLog: number;
+  weightRecorded?: boolean; // true when the user actually weighed in that day (not carried over)
   date: string; // YYYY-MM-DD
 }
 
@@ -49,6 +84,21 @@ export interface WorkoutLog {
   date: string; // YYYY-MM-DD
 }
 
+export interface MealItemEntry {
+  foodId?: string; // set when picked from the food database
+  name: string;
+  portionId?: string;
+  portionLabel: string;
+  quantity: number;
+  grams?: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  source: "database" | "manual" | "ai-photo" | "ai-text";
+}
+
 export interface MealLog {
   id: string;
   userId: string;
@@ -57,10 +107,14 @@ export interface MealLog {
   protein: number; // g
   carbs: number; // g
   fat: number; // g
+  fiber?: number; // g
   category: "Breakfast" | "Lunch" | "Dinner" | "Snack";
   ingredients?: string[];
+  items?: MealItemEntry[];
+  notes?: string;
   date: string; // YYYY-MM-DD
   loggedAt: string; // ISO String
+  updatedAt?: string;
 }
 
 export interface NotificationLog {
@@ -71,6 +125,50 @@ export interface NotificationLog {
   type: "info" | "warning" | "success" | "alert";
   read: boolean;
   createdAt: string; // ISO String
+  reminderKey?: string; // e.g. "meal:2026-11-03", used to send each reminder at most once
+}
+
+export interface DailyGoal {
+  id: string;
+  userId: string;
+  date: string; // YYYY-MM-DD
+  title: string;
+  description: string;
+  category: "activity" | "workout" | "nutrition" | "hydration" | "sleep" | "custom";
+  // Optional measurable target that is checked against the user's logs automatically
+  metric?: { type: "steps" | "water" | "meals" | "workouts"; target: number };
+  status: "suggested" | "accepted" | "completed" | "skipped";
+  source: "ai" | "rules" | "user";
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface MotivationEntry {
+  id: string;
+  userId: string;
+  kind: "check-in" | "weekly";
+  progressStatus: "building-baseline" | "on-track" | "improving" | "slowing";
+  headline: string;
+  message: string;
+  smallGoals: string[];
+  adjustments: string[];
+  celebrations: string[];
+  source: "ai" | "rules";
+  createdAt: string;
+}
+
+export interface BmiRecord {
+  id: string;
+  userId: string; // the logged-in user who saved it
+  subject: "self" | "other";
+  personName?: string;
+  age: number;
+  gender?: "Male" | "Female" | "Other";
+  heightCm: number;
+  weightKg: number;
+  bmi: number;
+  category: string | null;
+  createdAt: string;
 }
 
 export interface DatabaseSchema {
@@ -79,7 +177,13 @@ export interface DatabaseSchema {
   workout_logs: WorkoutLog[];
   meal_logs: MealLog[];
   notifications: NotificationLog[];
+  daily_goals: DailyGoal[];
+  motivation_history: MotivationEntry[];
+  bmi_records: BmiRecord[];
 }
+
+// Collections added after the first release; older database.json files get them on load
+const LATER_COLLECTIONS = ["daily_goals", "motivation_history", "bmi_records"] as const;
 
 class DatabaseEngine {
   private filePath: string;
@@ -168,7 +272,10 @@ class DatabaseEngine {
             read: false,
             createdAt: new Date().toISOString()
           }
-        ]
+        ],
+        daily_goals: [],
+        motivation_history: [],
+        bmi_records: []
       };
       this.memoryCache = defaultState;
       this.saveToDisk(defaultState);
@@ -181,7 +288,11 @@ class DatabaseEngine {
   private readFromDisk(): DatabaseSchema {
     try {
       const content = fs.readFileSync(this.filePath, "utf-8");
-      this.memoryCache = JSON.parse(content) as DatabaseSchema;
+      const parsed = JSON.parse(content) as DatabaseSchema;
+      for (const key of LATER_COLLECTIONS) {
+        if (!Array.isArray(parsed[key])) (parsed as any)[key] = [];
+      }
+      this.memoryCache = parsed;
       return this.memoryCache;
     } catch (error) {
       console.error("Database Engine: Failed to read from disk. Using fallback empty cache.", error);
@@ -192,7 +303,10 @@ class DatabaseEngine {
         daily_logs: [],
         workout_logs: [],
         meal_logs: [],
-        notifications: []
+        notifications: [],
+        daily_goals: [],
+        motivation_history: [],
+        bmi_records: []
       };
       this.memoryCache = emptyState;
       return emptyState;
@@ -275,6 +389,27 @@ class DatabaseEngine {
 
   public findNotifications(predicate: (notif: NotificationLog) => boolean): NotificationLog[] {
     return this.getCollection("notifications").filter(predicate);
+  }
+
+  public findDailyGoals(predicate: (goal: DailyGoal) => boolean): DailyGoal[] {
+    return this.getCollection("daily_goals").filter(predicate);
+  }
+
+  public findMotivation(predicate: (entry: MotivationEntry) => boolean): MotivationEntry[] {
+    return this.getCollection("motivation_history").filter(predicate);
+  }
+
+  public findBmiRecords(predicate: (record: BmiRecord) => boolean): BmiRecord[] {
+    return this.getCollection("bmi_records").filter(predicate);
+  }
+
+  public getPreferences(user: UserProfile): UserPreferences {
+    const saved = user.preferences;
+    return {
+      ...DEFAULT_PREFERENCES,
+      ...saved,
+      reminders: { ...DEFAULT_PREFERENCES.reminders, ...(saved?.reminders || {}) },
+    };
   }
 
   // Get or Create Daily Log helper

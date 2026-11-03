@@ -178,12 +178,17 @@ router.put("/daily-log", authenticateJwt, (req: Request, res: Response) => {
   const todayStr = new Date().toISOString().split("T")[0];
   const todayLog = db.getOrCreateDailyLog(payload.id, todayStr, user?.weight);
 
-  const updates: Record<string, number> = {};
+  const updates: Record<string, number | boolean> = {};
   for (const field of ["waterLogged", "stepsCount", "caloriesBurned", "caloriesConsumed", "weightLog"]) {
     const value = Number(req.body[field]);
     if (req.body[field] !== undefined && Number.isFinite(value) && value >= 0) {
       updates[field] = value;
     }
+  }
+
+  // A changed weight is a real weigh-in, as opposed to the value carried over from the profile
+  if (updates.weightLog !== undefined && updates.weightLog !== todayLog.weightLog) {
+    (updates as any).weightRecorded = true;
   }
 
   const log = db.update("daily_logs", todayLog.id, updates);

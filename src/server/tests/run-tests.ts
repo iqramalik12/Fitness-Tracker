@@ -7,6 +7,10 @@
 import { db, DatabaseSchema } from "../db.ts";
 import { signToken, verifyToken } from "../routers/auth.ts";
 import { calculateBMI } from "../routers/users.ts";
+import { calculateBmi, validateBmiInput, toCm, toKg } from "../../lib/bmi.ts";
+import { findFood, findPortion, portionNutrition, searchFoods, FOODS } from "../../lib/foods.ts";
+import { sumNutrients } from "../../lib/nutrition.ts";
+import { analyzeWeight, suggestGoals, buildSnapshot, dateOffset } from "../progress.ts";
 
 let testsPassed = 0;
 let testsFailed = 0;
@@ -190,6 +194,125 @@ describe("Hydration & Calories Logic Synchronization", () => {
 
     // Clean up
     db.delete("daily_logs", dailyLog.id);
+  });
+});
+
+
+describe("BMI Calculator Module", () => {
+  it("Should convert all supported height and weight units", () => {
+    expect(Math.round(toCm("ft-in", 5, 7) * 10) / 10).toBe(170.2);
+    expect(toCm("m", 1.7)).toBe(170);
+    expect(toCm("cm", 170)).toBe(170);
+    expect(Math.round(toKg("lb", 160) * 10) / 10).toBe(72.6);
+    expect(toKg("kg", 72)).toBe(72);
+  });
+
+  it("Should give the same BMI whichever units are used", () => {
+    const metric = calculateBmi({ age: 30, heightUnit: "cm", heightValue: 170.18, weightUnit: "kg", weightValue: 72.57 });
+    const imperial = calculateBmi({ age: 30, heightUnit: "ft-in", heightValue: 5, heightInches: 7, weightUnit: "lb", weightValue: 160 });
+    expect(metric.bmi).toBe(imperial.bmi);
+    expect(imperial.bmi).toBe(25.1);
+  });
+
+  it("Should apply adult categories at the standard cut-offs", () => {
+    const cat = (kg: number) => calculateBmi({ age: 25, heightUnit: "m", heightValue: 1, weightUnit: "kg", weightValue: kg }).category;
+    expect(cat(18.4)).toBe("Underweight");
+    expect(cat(18.5)).toBe("Healthy weight");
+    expect(cat(24.9)).toBe("Healthy weight");
+    expect(cat(25)).toBe("Overweight");
+    expect(cat(29.9)).toBe("Overweight");
+    expect(cat(30)).toBe("Obesity");
+  });
+
+  it("Should not apply adult categories to people under 20", () => {
+    const teen = calculateBmi({ age: 15, heightUnit: "cm", heightValue: 160, weightUnit: "kg", weightValue: 50 });
+    expect(teen.category).toBe(null);
+    expect(teen.ageGroup).toBe("child");
+    expect(teen.explanation).toInclude("BMI-for-age");
+    const adult = calculateBmi({ age: 20, heightUnit: "cm", heightValue: 160, weightUnit: "kg", weightValue: 50 });
+    expect(adult.category).toBe("Healthy weight");
+  });
+
+  it("Should reject invalid input", () => {
+    expect(validateBmiInput({ age: 1, heightUnit: "cm", heightValue: 170, weightUnit: "kg", weightValue: 70 }).length).toBe(1);
+    expect(validateBmiInput({ age: 30, heightUnit: "cm", heightValue: 12, weightUnit: "kg", weightValue: 70 }).length).toBe(1);
+    expect(validateBmiInput({ age: 30, heightUnit: "ft-in", heightValue: 5, heightInches: 14, weightUnit: "kg", weightValue: 70 }).length).toBe(1);
+    expect(validateBmiInput({ age: 30, heightUnit: "cm", heightValue: 170, weightUnit: "lb", weightValue: 0 }).length).toBe(1);
+    expect(validateBmiInput({ age: 30, heightUnit: "cm", heightValue: 170, weightUnit: "kg", weightValue: 70 }).length).toBe(0);
+  });
+});
+
+describe("Pakistani Meal Tracking Module", () => {
+  it("Should include the core Pakistani foods", () => {
+    for (const id of ["roti", "naan", "paratha", "daal-masoor", "chana", "lobia", "chicken-karahi", "chicken-salan", "mixed-sabzi", "rice-plain", "biryani", "pulao", "egg-boiled", "yogurt", "milk", "banana", "almonds", "samosa"]) {
+      expect(findFood(id)).toExist();
+    }
+    expect(FOODS.length).toBeGreaterThan(50);
+  });
+
+  it("Should find foods by Roman Urdu names", () => {
+    expect(searchFoods("chawal")[0].id).toBe("rice-plain");
+    expect(searchFoods("anda").some(f => f.id === "egg-boiled")).toBe(true);
+    expect(searchFoods("daal").length).toBeGreaterThan(3);
+  });
+
+  it("Should scale nutrition by portion and quantity", () => {
+    const roti = findFood("roti")!;
+    const two = portionNutrition(roti, findPortion(roti, "medium")!, 2); // 80 g at 280 kcal/100 g
+    expect(two.grams).toBe(80);
+    expect(two.calories).toBe(224);
+    const daal = findFood("daal-masoor")!;
+    const half = portionNutrition(daal, findPortion(daal, "half-bowl")!, 1);
+    const full = portionNutrition(daal, findPortion(daal, "full-bowl")!, 1);
+    expect(full.calories).toBe(half.calories * 2);
+    const grams = portionNutrition(daal, findPortion(daal, "g")!, 120);
+    expect(grams.calories).toBe(half.calories);
+  });
+
+  it("Should total a meal's items", () => {
+    const t = sumNutrients([{ calories: 224, protein: 7.6 }, { calories: 132, protein: 7.2, fiber: 4.2 }]);
+    expect(t.calories).toBe(356);
+    expect(t.protein).toBe(14.8);
+    expect(t.fiber).toBe(4.2);
+  });
+});
+
+describe("AI Motivation Coach Progress Analysis", () => {
+  const pts = (pairs: [number, number][]) => pairs.map(([daysAgo, weight]) => ({ date: dateOffset(daysAgo), weight }));
+
+  it("Should not judge a trend without enough weigh-ins", () => {
+    const r = analyzeWeight(pts([[0, 80], [1, 81.5]]), "Lose Weight");
+    expect(r.trend).toBe("insufficient-data");
+    expect(r.plateau).toBe(false);
+  });
+
+  it("Should ignore normal daily swings when the average is falling", () => {
+    // Earlier weeks average 82; this week bounces 80-81.2 but averages ~80.6
+    const r = analyzeWeight(pts([[21, 82.2], [18, 81.8], [16, 82], [6, 81.2], [3, 80.1], [0, 80.5]]), "Lose Weight");
+    expect(r.trend).toBe("down");
+    expect(r.plateau).toBe(false);
+  });
+
+  it("Should flag a plateau when the multi-week average is flat for a weight-loss goal", () => {
+    const r = analyzeWeight(pts([[24, 80.0], [20, 80.4], [15, 79.9], [5, 80.3], [2, 79.8], [0, 80.2]]), "Lose Weight");
+    expect(r.trend).toBe("flat");
+    expect(r.plateau).toBe(true);
+  });
+
+  it("Should not call a stable weight a plateau for a stay-active goal", () => {
+    const r = analyzeWeight(pts([[24, 70], [20, 70.2], [5, 70.1], [1, 70]]), "Stay Active");
+    expect(r.plateau).toBe(false);
+  });
+
+  it("Should suggest small goals sized to the user's own activity", () => {
+    const user = db.getCollection("users")[0];
+    const snap = buildSnapshot(user);
+    snap.activity.avgStepsThisWeek = 4000;
+    snap.activity.todaySteps = 0;
+    const goals = suggestGoals(snap);
+    expect(goals.length).toBeGreaterThan(1);
+    const walk = goals.find(g => g.metric?.type === "steps")!;
+    expect(walk.metric!.target).toBe(5000);
   });
 });
 

@@ -11,6 +11,10 @@ import waterRouter from "./src/server/routers/water.ts";
 import caloriesRouter from "./src/server/routers/calories.ts";
 import notificationsRouter from "./src/server/routers/notifications.ts";
 import aiRouter from "./src/server/routers/ai.ts";
+import mealsRouter from "./src/server/routers/meals.ts";
+import bmiRouter from "./src/server/routers/bmi.ts";
+import progressRouter from "./src/server/routers/progress.ts";
+import goalsRouter from "./src/server/routers/goals.ts";
 
 dotenv.config();
 
@@ -40,6 +44,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Meal photos need a larger body; this parser runs first so the global 2mb limit is skipped for that route
+app.use("/api/meals/analyze-photo", express.json({ limit: "8mb" }));
+
 // Enable JSON parsing with built-in limits to shield against body-payload denial-of-service attacks
 app.use(express.json({ limit: "2mb" }));
 
@@ -55,6 +62,10 @@ app.use("/api/workouts", workoutsRouter);
 app.use("/api/water", waterRouter);
 app.use("/api/calories", caloriesRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/meals", mealsRouter);
+app.use("/api/bmi", bmiRouter);
+app.use("/api/progress", progressRouter);
+app.use("/api/goals", goalsRouter);
 
 // Support both route namespaces for maximum backwards compatibility with frontend calls
 app.use("/api/ai", aiRouter);

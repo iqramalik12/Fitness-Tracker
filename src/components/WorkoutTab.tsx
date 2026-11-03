@@ -5,7 +5,7 @@ import { WORKOUT_PLANS } from "../data";
 import { WorkoutPlan, Exercise } from "../types";
 
 interface WorkoutTabProps {
-  onWorkoutComplete: (caloriesBurned: number) => void;
+  onWorkoutComplete: (caloriesBurned: number, plan?: WorkoutPlan) => void;
 }
 
 export default function WorkoutTab({ onWorkoutComplete }: WorkoutTabProps) {
@@ -60,7 +60,7 @@ export default function WorkoutTab({ onWorkoutComplete }: WorkoutTabProps) {
 
   const handleFinishAndLog = () => {
     if (activePlan) {
-      onWorkoutComplete(activePlan.caloriesBurn);
+      onWorkoutComplete(activePlan.caloriesBurn, activePlan);
     }
     setActivePlan(null);
     setSelectedPlan(null);

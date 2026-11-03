@@ -3,21 +3,34 @@ import { motion, AnimatePresence } from "motion/react";
 import { 
   Send, Bot, Sparkles, MessageSquare, AlertCircle, HelpCircle, Dumbbell, 
   Utensils, Trophy, Calendar, Zap, Volume2, VolumeX, Check, Plus, 
-  Flame, Droplets, Clock, HeartPulse, Sparkle, RefreshCw, ChevronRight, Play
+  Flame, Droplets, Clock, HeartPulse, Sparkle, RefreshCw, ChevronRight, Play,
+  Target, TrendingUp, Bell
 } from "lucide-react";
 import { UserProfile, DailyLog, ChatMessage } from "../types";
+import { getToken, isSignedIn } from "../lib/api";
+import DailyGoalsPanel from "./coach/DailyGoalsPanel";
+import ProgressPanel from "./coach/ProgressPanel";
+import RemindersPanel from "./coach/RemindersPanel";
 
 interface AiCoachTabProps {
   profile: UserProfile;
   log?: DailyLog;
   onLogUpdate?: (updatedFields: Partial<DailyLog>) => void;
+  onWeightLogged?: (profile: UserProfile, log: DailyLog) => void;
+  initialSubTab?: AiSubTab;
 }
 
 // Sub-tabs of the AI Suite
-type AiSubTab = "chat" | "workout" | "diet" | "tips" | "motivation" | "roadmap";
+export type AiSubTab = "chat" | "goals" | "progress" | "reminders" | "workout" | "diet" | "tips" | "motivation" | "roadmap";
 
-export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProps) {
-  const [activeSubTab, setActiveSubTab] = useState<AiSubTab>("chat");
+export default function AiCoachTab({ profile, log, onLogUpdate, onWeightLogged, initialSubTab }: AiCoachTabProps) {
+  const [activeSubTab, setActiveSubTab] = useState<AiSubTab>(initialSubTab || "chat");
+  const signedIn = isSignedIn();
+
+  // Opening the coach from elsewhere (e.g. the Home goals card) jumps to the requested section
+  useEffect(() => {
+    if (initialSubTab) setActiveSubTab(initialSubTab);
+  }, [initialSubTab]);
 
   // ==========================================
   // STATE DEFINITIONS
@@ -145,9 +158,13 @@ export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProp
     setChatLoading(true);
 
     try {
+      const token = getToken();
       const response = await fetch("/api/coach", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           messages: updatedMessages,
           profile,
@@ -350,6 +367,8 @@ export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProp
   const getSuggestionChips = () => {
     if (profile.country === "Pakistan") {
       return [
+        "How did I eat today based on my meal log?",
+        "Mera weight kam nahi ho raha, kya karun?",
         "Suggest a high-protein Halal snack from common Pakistani foods.",
         "How should I adjust my running schedule for hot weather?",
         "Provide a quick calorie count for common roti & dal meals."
@@ -410,6 +429,25 @@ export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProp
             <MessageSquare className="w-3.5 h-3.5" />
             <span>Pulse Coach</span>
           </button>
+
+          {([
+            ["goals", "Daily Goals", Target],
+            ["progress", "Progress", TrendingUp],
+            ["reminders", "Reminders", Bell],
+          ] as const).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              onClick={() => setActiveSubTab(id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === id
+                  ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/10"
+                  : "bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-850"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span>{label}</span>
+            </button>
+          ))}
 
           <button
             onClick={() => setActiveSubTab("workout")}
@@ -557,7 +595,7 @@ export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProp
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleSendChatMessage();
                     }}
-                    placeholder="Ask about Halal nutrition, British gyms, weight targets..."
+                    placeholder="Ask in English or Roman Urdu: meals, workouts, progress..."
                     className="flex-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 outline-none transition-colors"
                   />
                   <button
@@ -569,6 +607,21 @@ export default function AiCoachTab({ profile, log, onLogUpdate }: AiCoachTabProp
                   </button>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {/* COACH: DAILY GOALS, PROGRESS, REMINDERS */}
+          {(activeSubTab === "goals" || activeSubTab === "progress" || activeSubTab === "reminders") && (
+            <motion.div
+              key={`${activeSubTab}-tab`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.15 }}
+            >
+              {activeSubTab === "goals" && <DailyGoalsPanel signedIn={signedIn} />}
+              {activeSubTab === "progress" && <ProgressPanel signedIn={signedIn} profile={profile} onWeightLogged={onWeightLogged} />}
+              {activeSubTab === "reminders" && <RemindersPanel signedIn={signedIn} />}
             </motion.div>
           )}
 

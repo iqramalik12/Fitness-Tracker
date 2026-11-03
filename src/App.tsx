@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
-import { Home, Dumbbell, Apple, Bot, User, Activity } from "lucide-react";
+import { Home, Dumbbell, Apple, Bot, User, Activity, Calculator, Bell, X } from "lucide-react";
 import DeviceFrame from "./components/DeviceFrame";
 import SplashScreen from "./components/SplashScreen";
 import OnboardingScreen from "./components/OnboardingScreen";
@@ -15,7 +15,10 @@ import WorkoutTab from "./components/WorkoutTab";
 import NutritionTab from "./components/NutritionTab";
 import AiCoachTab from "./components/AiCoachTab";
 import ProfileTab from "./components/ProfileTab";
-import { UserProfile, DailyLog } from "./types";
+import BmiTab from "./components/BmiTab";
+import { AiSubTab } from "./components/AiCoachTab";
+import { UserProfile, DailyLog, WorkoutPlan, AppNotification } from "./types";
+import { api, localClock } from "./lib/api";
 import { DEFAULT_PROFILE } from "./data";
 
 const todayStr = () => new Date().toISOString().split("T")[0];
@@ -25,6 +28,7 @@ const TABS = [
   { label: "Workout", icon: Dumbbell },
   { label: "Diet", icon: Apple },
   { label: "AI Coach", icon: Bot },
+  { label: "BMI", icon: Calculator },
   { label: "Profile", icon: User }
 ];
 
@@ -73,6 +77,30 @@ export default function App() {
   // Core synchronized profile and daily statistics states
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [dailyLog, setDailyLog] = useState<DailyLog>(emptyLog(DEFAULT_PROFILE.weight));
+  const [coachSubTab, setCoachSubTab] = useState<AiSubTab | undefined>(undefined);
+  const [reminder, setReminder] = useState<AppNotification | null>(null);
+
+  // Send any due reminders while the app is open (the server limits how many per day)
+  useEffect(() => {
+    if (activeScreen !== "main" || !localStorage.getItem("pulse_auth_token")) return;
+    const check = async () => {
+      try {
+        const data = await api<{ created: AppNotification[] }>("/api/notifications/reminders/check", "POST", localClock());
+        if (data.created.length) setReminder(data.created[0]);
+      } catch {
+        // Reminders are best-effort; ignore offline errors
+      }
+    };
+    check();
+    const timer = setInterval(check, 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [activeScreen]);
+
+  useEffect(() => {
+    if (!reminder) return;
+    const t = setTimeout(() => setReminder(null), 8000);
+    return () => clearTimeout(t);
+  }, [reminder]);
 
   // Pull today's log from the server so data follows the account across devices
   const loadServerLog = async () => {
@@ -155,6 +183,24 @@ export default function App() {
     apiRequest("/api/users/profile", "PUT", newProfile);
   };
 
+  // The server already stored this log (e.g. after a meal or workout was saved); just show it
+  const applyServerLog = (serverLog: DailyLog) => {
+    const next = { ...dailyLog, ...serverLog };
+    setDailyLog(next);
+    localStorage.setItem("pulse_daily_log_v3", JSON.stringify(next));
+  };
+
+  const handleWeightLogged = (serverProfile: UserProfile, serverLog: DailyLog) => {
+    setProfile(serverProfile);
+    localStorage.setItem("pulse_user_profile_v3", JSON.stringify(serverProfile));
+    applyServerLog(serverLog);
+  };
+
+  const openCoach = (subTab: AiSubTab) => {
+    setCoachSubTab(subTab);
+    setActiveTab(3);
+  };
+
   const saveDailyLog = (newLog: DailyLog) => {
     setDailyLog(newLog);
     localStorage.setItem("pulse_daily_log_v3", JSON.stringify(newLog));
@@ -214,7 +260,23 @@ export default function App() {
     saveDailyLog(nextLog);
   };
 
-  const handleWorkoutComplete = (caloriesBurned: number) => {
+  // Signed-in users get the workout saved to their history, which the coach uses for consistency
+  const handleWorkoutComplete = async (caloriesBurned: number, plan?: Pick<WorkoutPlan, "title" | "category" | "durationMinutes" | "exercisesCount">) => {
+    if (plan && localStorage.getItem("pulse_auth_token")) {
+      try {
+        const data = await api<{ dailyLog: DailyLog }>("/api/workouts/log", "POST", {
+          title: plan.title,
+          category: plan.category,
+          durationMinutes: plan.durationMinutes,
+          caloriesBurn: caloriesBurned,
+          exercisesCount: plan.exercisesCount,
+        });
+        if (data.dailyLog) applyServerLog(data.dailyLog);
+        return;
+      } catch (e) {
+        console.warn("Workout history sync failed; updating today's totals only:", e);
+      }
+    }
     const nextLog: DailyLog = {
       ...dailyLog,
       caloriesBurned: dailyLog.caloriesBurned + caloriesBurned,
@@ -275,6 +337,8 @@ export default function App() {
             onLogUpdate={handleLogUpdate}
             onNavigateToTab={setActiveTab}
             onProfileUpdate={saveProfile}
+            onWorkoutRecorded={handleWorkoutComplete}
+            onOpenCoach={openCoach}
           />
         );
       case 1:
@@ -285,6 +349,7 @@ export default function App() {
             profile={profile}
             log={dailyLog}
             onLogUpdate={handleLogUpdate}
+            onServerLog={applyServerLog}
           />
         );
       case 3:
@@ -293,9 +358,13 @@ export default function App() {
             profile={profile}
             log={dailyLog}
             onLogUpdate={handleLogUpdate}
+            onWeightLogged={handleWeightLogged}
+            initialSubTab={coachSubTab}
           />
         );
       case 4:
+        return <BmiTab profile={profile} />;
+      case 5:
         return (
           <ProfileTab
             profile={profile}
@@ -377,7 +446,7 @@ export default function App() {
                     return (
                       <button
                         key={tab.label}
-                        onClick={() => setActiveTab(idx)}
+                        onClick={() => { setCoachSubTab(undefined); setActiveTab(idx); }}
                         className={`relative flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors cursor-pointer ${isActive ? "text-white" : "text-slate-400 hover:text-white hover:bg-white/5"}`}
                       >
                         {isActive && (
@@ -401,7 +470,27 @@ export default function App() {
               </aside>
             )}
 
-            <div className="flex-1 flex flex-col min-h-0 min-w-0">
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
+              {/* Reminder toast */}
+              <AnimatePresence>
+                {reminder && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -16 }}
+                    className="absolute top-3 left-3 right-3 md:left-auto md:w-96 z-[60] bg-slate-900/95 backdrop-blur border border-emerald-500/30 rounded-2xl p-3 flex gap-3 shadow-2xl"
+                    role="status"
+                  >
+                    <Bell className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <span className="text-xs font-bold text-white">{reminder.title}</span>
+                      <span className="text-[11px] text-slate-400">{reminder.message}</span>
+                    </div>
+                    <button onClick={() => setReminder(null)} className="text-slate-500 hover:text-white cursor-pointer" aria-label="Dismiss"><X className="w-4 h-4" /></button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Main Content Area */}
               <div className={`flex-1 overflow-hidden flex flex-col min-h-0 ${webLayout ? "md:w-full md:max-w-2xl md:mx-auto md:my-6 md:rounded-[2rem] md:border md:border-white/10 md:bg-slate-950/90 md:shadow-2xl" : ""}`}>
                 <AnimatePresence mode="wait">
@@ -419,7 +508,7 @@ export default function App() {
                   return (
                     <motion.button
                       key={tab.label}
-                      onClick={() => setActiveTab(idx)}
+                      onClick={() => { setCoachSubTab(undefined); setActiveTab(idx); }}
                       whileTap={{ scale: 0.88 }}
                       className="flex flex-col items-center justify-center flex-1 h-full py-1 text-slate-400 hover:text-white transition-colors relative cursor-pointer"
                     >

@@ -38,7 +38,8 @@ import {
   CartesianGrid,
   Legend
 } from "recharts";
-import { UserProfile, DailyLog, ProgressHistory } from "../types";
+import { UserProfile, DailyLog, ProgressHistory, WorkoutPlan } from "../types";
+import CoachGoalsCard from "./coach/CoachGoalsCard";
 import { MOCK_HISTORY_7DAYS, WORKOUT_PLANS } from "../data";
 
 interface HomeDashboardProps {
@@ -47,6 +48,9 @@ interface HomeDashboardProps {
   onLogUpdate: (updatedLog: Partial<DailyLog>) => void;
   onNavigateToTab: (tabIndex: number) => void;
   onProfileUpdate?: (updatedProfile: UserProfile) => void;
+  // Saves a workout to history (signed-in users); falls back to onLogUpdate when absent
+  onWorkoutRecorded?: (caloriesBurned: number, plan: Pick<WorkoutPlan, "title" | "category" | "durationMinutes" | "exercisesCount">) => void;
+  onOpenCoach?: (subTab: "goals" | "progress") => void;
 }
 
 type SubTab = "TODAY" | "ANALYTICS" | "LIBRARY" | "ALERTS";
@@ -64,7 +68,9 @@ export default function HomeDashboard({
   log,
   onLogUpdate,
   onNavigateToTab,
-  onProfileUpdate
+  onProfileUpdate,
+  onWorkoutRecorded,
+  onOpenCoach
 }: HomeDashboardProps) {
   // Sub-navigation state
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("TODAY");
@@ -492,11 +498,15 @@ export default function HomeDashboard({
     const intensityFactor = customWorkoutIntensity === "High" ? 12 : customWorkoutIntensity === "Medium" ? 8 : 5;
     const computedBurn = Math.round(duration * intensityFactor);
 
-    // Update state log
-    onLogUpdate({
-      caloriesBurned: log.caloriesBurned + computedBurn,
-      stepsCount: log.stepsCount + Math.round(duration * 60) // simulated steps from physical exercise
-    });
+    if (onWorkoutRecorded) {
+      onWorkoutRecorded(computedBurn, { title: customWorkoutName.trim(), category: "Custom" as WorkoutPlan["category"], durationMinutes: duration, exercisesCount: sets });
+    } else {
+      // Update state log
+      onLogUpdate({
+        caloriesBurned: log.caloriesBurned + computedBurn,
+        stepsCount: log.stepsCount + Math.round(duration * 60) // simulated steps from physical exercise
+      });
+    }
 
     setWorkoutLogSuccess(`Saved! Logged physical activity "${customWorkoutName}" (+${computedBurn} kcal)`);
     triggerAudioBeep();
@@ -826,6 +836,9 @@ export default function HomeDashboard({
                 </button>
               </div>
             </div>
+
+            {/* AI coach goals for today */}
+            {onOpenCoach && <CoachGoalsCard onOpen={onOpenCoach} />}
 
             {/* Suggested Workout Program Quick Launcher */}
             <div className="bg-slate-900/60 border border-slate-850 p-4 rounded-2xl flex items-center gap-3">
